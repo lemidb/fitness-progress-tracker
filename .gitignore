@@ -1,0 +1,57 @@
+# Credentials (NEVER commit these)
+credentials/
+*.json
+!pyproject.toml
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+.myenv312
+.vscode 
+
+
+# ML models and checkpoints
+models/
+*.pth
+*.pt
+*.onnx
+*.pkl
+*.joblib
+
+# Temp files
+temp/
+*.mp4
+*.mov
+*.avi
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+logs/
+credentials/*.json
