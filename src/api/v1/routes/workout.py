@@ -122,6 +122,7 @@ async def sync_schedule(
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            
             detail=str(exc),
         ) from exc
     except Exception as exc:

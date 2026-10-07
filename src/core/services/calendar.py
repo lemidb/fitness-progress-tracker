@@ -1,11 +1,8 @@
 """
 Google Calendar service.
 
-Auth flow:
-  - OAuth 2.0 (user-consent): uses credentials/google_oauth.json + token.json
-  - Service Account (server-to-server): uses credentials/service_account.json
-
-The service auto-detects which credentials are configured via Settings.
+Auth is handled by `src.core.services.google_auth.get_google_credentials`.
+Run `python scripts/authorize_google.py` once to generate credentials/token.json.
 """
 from __future__ import annotations
 
@@ -14,24 +11,18 @@ import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import pytz
-from google.auth.transport.requests import Request
-from google.oauth2 import service_account
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.config import get_settings
 from src.core.models.domain import CalendarWorkout, ExerciseType
+from src.core.services.google_auth import get_google_credentials
 
 logger = logging.getLogger(__name__)
-
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
 WORKOUT_KEYWORDS = {
     "cardio": ["cardio", "run", "running", "bike", "cycling", "swim", "swimming", "elliptical", "treadmill", "hiit"],
@@ -50,40 +41,9 @@ class GoogleCalendarService:
     # ── Auth ─────────────────────────────────────────────────────────────────
 
     def _build_service(self):
-        """Build the Calendar API service with the best available credentials."""
-        creds: Credentials | None = None
-
-        sa_file = self.settings.google_service_account_file
-        if sa_file and Path(sa_file).exists():
-            # Service Account path (preferred for production)
-            creds = service_account.Credentials.from_service_account_file(
-                sa_file, scopes=SCOPES
-            )
-            logger.info("Calendar: using service account credentials")
-        else:
-            # OAuth 2.0 user-consent path
-            token_path = Path(self.settings.google_token_file)
-            oauth_path = Path(self.settings.google_credentials_file)
-
-            if token_path.exists():
-                creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
-
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                elif oauth_path.exists():
-                    flow = InstalledAppFlow.from_client_secrets_file(str(oauth_path), SCOPES)
-                    creds = flow.run_local_server(port=0)
-                    token_path.parent.mkdir(parents=True, exist_ok=True)
-                    token_path.write_text(creds.to_json())
-                else:
-                    raise FileNotFoundError(
-                        f"No Google credentials found. "
-                        f"Expected service account at '{sa_file}' or OAuth credentials at '{oauth_path}'. "
-                        "See README for setup instructions."
-                    )
-            logger.info("Calendar: using OAuth 2.0 credentials")
-
+        """Build the Calendar API service using the shared credential helper."""
+        creds = get_google_credentials()
+        logger.info("Calendar: credentials loaded (type=%s)", type(creds).__name__)
         return build("calendar", "v3", credentials=creds)
 
     @property

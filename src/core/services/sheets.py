@@ -12,15 +12,10 @@ import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
-from google.oauth2 import service_account
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 import gspread
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -30,13 +25,9 @@ from src.core.models.domain import (
     SessionMetadata,
     WorkoutEntry,
 )
+from src.core.services.google_auth import get_google_credentials
 
 logger = logging.getLogger(__name__)
-
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.file",
-]
 
 SHEET_HEADERS = [
     "date", "user_id", "exercise", "exercise_type", "muscle_group",
@@ -57,33 +48,8 @@ class GoogleSheetsService:
     # ── Auth / Setup ─────────────────────────────────────────────────────────
 
     def _authorize(self) -> gspread.Client:
-        sa_file = self.settings.google_service_account_file
-        if sa_file and Path(sa_file).exists():
-            creds = service_account.Credentials.from_service_account_file(
-                sa_file, scopes=SCOPES
-            )
-            return gspread.authorize(creds)
-
-        # OAuth flow
-        token_path = Path(self.settings.google_token_file)
-        oauth_path = Path(self.settings.google_credentials_file)
-        creds: Credentials | None = None
-
-        if token_path.exists():
-            creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
-
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            elif oauth_path.exists():
-                flow = InstalledAppFlow.from_client_secrets_file(str(oauth_path), SCOPES)
-                creds = flow.run_local_server(port=0)
-                token_path.write_text(creds.to_json())
-            else:
-                raise FileNotFoundError(
-                    "No Google credentials found for Sheets. "
-                    "See README for setup instructions."
-                )
+        """Obtain a gspread client using the shared credential helper."""
+        creds = get_google_credentials()
         return gspread.authorize(creds)
 
     @property
