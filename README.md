@@ -46,13 +46,14 @@ Compose no longer starts a second PostgreSQL database. Redis is retained for the
 
 ## Public MVP Deployment (Render)
 
-The repository includes [`render.yaml`](render.yaml), which configures a native Python web service with `/health` checks and a lean dependency list in [`requirements-render.txt`](requirements-render.txt). Connect the GitHub repository to Render, select **New → Blueprint**, and create the service from the `main` branch. Set the required secrets in the Render service environment before the first successful deploy:
+The repository includes [`render.yaml`](render.yaml), which configures a native Python web service with `/health` checks and a lean dependency list in [`requirements-render.txt`](requirements-render.txt). Connect the GitHub repository to Render, select **New → Blueprint**, and create the service from the `main` branch. Set these values in the Render service environment:
 
-- `DATABASE_URL`: the Supabase PostgreSQL connection string (use the pooler URL and `ssl=require` as appropriate).
-- `SUPABASE_URL` and `SUPABASE_ANON_KEY`: used to validate mobile Supabase access tokens.
-- `GEMINI_API_KEY`: optional for MVP workout logging; required for form video analysis.
+- Required for API startup and authenticated MVP routes: `DATABASE_URL` (Supabase PostgreSQL connection string, pooler URL with SSL as appropriate), `SUPABASE_URL`, and `SUPABASE_ANON_KEY` (Supabase public/anon key used only to verify access tokens).
+- Required for AI video analysis: `GEMINI_API_KEY` from Google AI Studio. `GEMINI_MODEL` defaults to `gemini-2.5-flash` and can be changed if another supported model is enabled for the key/project.
+- Google Calendar sync: `GOOGLE_CALENDAR_ID` defaults to `primary`. `GOOGLE_OAUTH_CLIENT_ID` is needed if the backend must refresh an expired access token; `GOOGLE_OAUTH_CLIENT_SECRET` is needed only for OAuth client types that require it. Flutter must obtain Calendar read scope and pass the user's OAuth access token (and refresh token when available) to the API.
+- Runtime values already set by the Blueprint: `APP_ENV=production`, `APP_DEBUG=false`, `PYTHON_VERSION=3.12.10`. Render supplies `PORT`; do not set it manually.
 
-Run the workout and calendar SQL migrations in the Supabase SQL Editor before expecting database-backed routes to work. `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` are optional unless the Google token-refresh flow needs them. Set secrets only in Render's environment settings; never commit `.env`, OAuth JSON, Supabase credentials, or Gemini keys.
+Apply the workout and calendar SQL migrations in the Supabase SQL Editor before expecting database-backed routes to work. `OPENAI_API_KEY`, `GOOGLE_CREDENTIALS_FILE`, `GOOGLE_TOKEN_FILE`, `GOOGLE_SERVICE_ACCOUNT_FILE`, and `REDIS_URL` are not needed for the currently exposed MVP API routes. Set secrets only in Render's environment settings; never commit `.env`, OAuth JSON, Supabase credentials, or Gemini keys.
 
 Render Free is for demos, not production: services spin down after 15 minutes without traffic and can take about a minute to wake; the filesystem is ephemeral; the free instance has 512 MB RAM. No uploaded workout video is retained by this API, but use short/compressed clips for free-tier reliability. Supabase remains the persistent database. A free Supabase project may also pause when inactive. Verify current provider limits and terms before distributing broadly.
 
