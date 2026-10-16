@@ -24,6 +24,8 @@ Transform gym workout tracking from tedious spreadsheet logging to a seamless mo
 
 ## 2. Technical Context
 
+> **Backend contract update:** Supabase Auth now owns registration, sign-in, and token refresh. FastAPI accepts the Supabase access token and is the only client-facing business-data API. The API routes and per-set workout payload described in the current backend README supersede the legacy auth and single-weight examples below. Workout history is returned as sessions containing exercise entries and individual sets; exercise-entry parents do not store weight. Google Calendar and AI Labs are deferred to phase 2.
+
 ### 2.1 Backend API (Already Built)
 - **Base URL:** `https://api.fitness-ai.com` (configurable per environment)
 - **Authentication:** JWT Bearer tokens (access + refresh token flow)
@@ -397,7 +399,7 @@ Transform gym workout tracking from tedious spreadsheet logging to a seamless mo
 - ✅ Exercise autocomplete shows exercise type icon (🏋️ strength, 🏃 cardio, 🧘 flexibility)
 - ✅ Search results include aliases (e.g., "bench" matches "Bench Press", "Barbell Bench Press")
 
-**Pre-Defined Exercise Library (Minimum 50 exercises):**
+**Pre-Defined Exercise Library (Minimum 50 exercises): they all be logged to supabase database as master data**
 - **Chest:** Bench Press, Incline Bench Press, Dumbbell Fly, Cable Crossover, Push-ups
 - **Back:** Deadlift, Barbell Row, Pull-ups, Lat Pulldown, Seated Cable Row, T-Bar Row
 - **Legs:** Squat, Front Squat, Leg Press, Romanian Deadlift, Lunges, Leg Curl, Leg Extension

@@ -1,93 +1,66 @@
-"""
-JWT authentication middleware.
-
-Endpoints can be protected by adding:
-    current_user: str = Depends(get_current_user)
-"""
+"""Supabase Auth token verification dependencies."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Any
 
+import httpx
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
-from pydantic import BaseModel
 
 from src.core.config import get_settings
 
-settings = get_settings()
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-class TokenData(BaseModel):
-    user_id: str
-    exp: datetime
-
-
-class TokenPair(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int
-
-
-def create_access_token(user_id: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(
-        minutes=settings.jwt_access_token_expire_minutes
-    )
-    return jwt.encode(
-        {"sub": user_id, "exp": expire, "type": "access"},
-        settings.app_secret_key,
-        algorithm=settings.jwt_algorithm,
-    )
-
-
-def create_refresh_token(user_id: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(
-        days=settings.jwt_refresh_token_expire_days
-    )
-    return jwt.encode(
-        {"sub": user_id, "exp": expire, "type": "refresh"},
-        settings.app_secret_key,
-        algorithm=settings.jwt_algorithm,
-    )
-
-
-def create_token_pair(user_id: str) -> TokenPair:
-    return TokenPair(
-        access_token=create_access_token(user_id),
-        refresh_token=create_refresh_token(user_id),
-        expires_in=settings.jwt_access_token_expire_minutes * 60,
-    )
-
-
-def decode_token(token: str) -> TokenData:
-    try:
-        payload = jwt.decode(
-            token, settings.app_secret_key, algorithms=[settings.jwt_algorithm]
-        )
-        user_id: str = payload.get("sub", "")
-        if not user_id:
-            raise JWTError("Missing sub claim")
-        return TokenData(user_id=user_id, exp=payload["exp"])
-    except JWTError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid or expired token: {exc}",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc
-
-
-def get_current_user(
+async def get_supabase_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-) -> str:
-    """FastAPI dependency — returns user_id from Bearer token."""
-    if not credentials:
+) -> dict[str, Any]:
+    """Validate the bearer token with Supabase Auth and return its user record."""
+    settings = get_settings()
+    if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token_data = decode_token(credentials.credentials)
-    return token_data.user_id
+    if not settings.supabase_url or not settings.supabase_anon_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Supabase Auth is not configured",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{settings.supabase_url.rstrip('/')}/auth/v1/user",
+                headers={
+                    "apikey": settings.supabase_anon_key,
+                    "Authorization": f"Bearer {credentials.credentials}",
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to validate Supabase access token",
+        ) from exc
+
+    if response.status_code != status.HTTP_200_OK:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = response.json()
+    if not user.get("id"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Supabase token did not resolve to a user",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+
+
+async def get_current_user(user: Annotated[dict[str, Any], Depends(get_supabase_user)]) -> str:
+    """Return the authenticated Supabase user ID for ownership scoping."""
+    return str(user["id"])

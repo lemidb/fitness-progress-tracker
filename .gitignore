@@ -27,7 +27,7 @@ pip-wheel-metadata/
 
 
 # ML models and checkpoints
-models/
+/models/
 *.pth
 *.pt
 *.onnx

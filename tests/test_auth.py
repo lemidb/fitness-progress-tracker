@@ -1,48 +1,91 @@
-from uuid import uuid4
+from types import SimpleNamespace
 
-import pytest
 from fastapi.testclient import TestClient
 
+from src.api.middleware import auth as auth_module
 from src.main import app
 
 
-@pytest.fixture(scope="module")
-def client() -> TestClient:
-    with TestClient(app) as test_client:
-        yield test_client
+class FakeResponse:
+    def __init__(self, status_code: int, payload: dict):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self) -> dict:
+        return self._payload
 
 
-def test_register_and_login_flow(client: TestClient):
-    username = f"user_{uuid4().hex[:8]}"
-    password = "secret123"
+class FakeAsyncClient:
+    response = FakeResponse(200, {})
 
-    register_response = client.post(
-        "/api/v1/auth/register",
-        json={"username": username, "password": password},
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def get(self, url: str, headers: dict):
+        assert url == "https://example.supabase.co/auth/v1/user"
+        assert headers["apikey"] == "test-anon-key"
+        assert headers["Authorization"] == "Bearer supabase-access-token"
+        return self.response
+
+
+def test_auth_me_uses_supabase_verified_identity(monkeypatch):
+    monkeypatch.setattr(
+        auth_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            supabase_url="https://example.supabase.co",
+            supabase_anon_key="test-anon-key",
+        ),
     )
-    assert register_response.status_code == 200
-    payload = register_response.json()
-    assert payload["username"] == username
-    assert payload["user_id"]
-    assert "access_token" in payload
-    assert "refresh_token" in payload
-    assert payload["token_type"] == "bearer"
-
-    login_response = client.post(
-        "/api/v1/auth/login",
-        json={"username": username, "password": password},
+    FakeAsyncClient.response = FakeResponse(
+        200,
+        {
+            "id": "c3a2f12d-448f-4a37-9e56-93a34852f2e1",
+            "email": "athlete@example.com",
+            "user_metadata": {"username": "GymAthlete"},
+        },
     )
-    assert login_response.status_code == 200
-    body = login_response.json()
-    assert "access_token" in body
-    assert "refresh_token" in body
-    assert body["token_type"] == "bearer"
+    monkeypatch.setattr(auth_module.httpx, "AsyncClient", FakeAsyncClient)
 
-    me_response = client.get(
+    response = TestClient(app).get(
         "/api/v1/auth/me",
-        headers={"Authorization": f"Bearer {body['access_token']}"},
+        headers={"Authorization": "Bearer supabase-access-token"},
     )
-    assert me_response.status_code == 200
-    profile = me_response.json()
-    assert profile["username"] == username
-    assert profile["user_id"] == payload["user_id"]
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "user_id": "c3a2f12d-448f-4a37-9e56-93a34852f2e1",
+        "username": "GymAthlete",
+        "email": "athlete@example.com",
+    }
+
+
+def test_auth_me_rejects_invalid_supabase_token(monkeypatch):
+    monkeypatch.setattr(
+        auth_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            supabase_url="https://example.supabase.co",
+            supabase_anon_key="test-anon-key",
+        ),
+    )
+    FakeAsyncClient.response = FakeResponse(401, {"message": "invalid token"})
+    monkeypatch.setattr(auth_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = TestClient(app).get(
+        "/api/v1/auth/me",
+        headers={"Authorization": "Bearer supabase-access-token"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_auth_me_requires_bearer_token():
+    response = TestClient(app).get("/api/v1/auth/me")
+    assert response.status_code == 401

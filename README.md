@@ -1,207 +1,131 @@
-# Fitness AI — Backend API
+# Fitness AI API
 
-State-of-the-art AI fitness platform built on FastAPI + Python.
-Phase 1: Google Calendar sync, Google Sheets workout logging, JWT auth.
+FastAPI is the business API for Fitness AI. Supabase Auth provides registered-user identity, and Supabase PostgreSQL stores the exercise catalog, workout sessions, exercise entries, and individual sets. Mobile clients authenticate with Supabase, then send the Supabase access token to this API. The API derives user ownership from the validated token; clients must not send a `user_id` for workout operations.
 
----
+Google Calendar scheduling and AI Labs endpoints are available for Phase 2. Calendar OAuth tokens are passed per request and are not stored by the API.
 
-## Project Structure
+## Local Setup
 
-```
-fitness_ai/
-├── src/
-│   ├── main.py                          # FastAPI app entry point
-│   ├── core/
-│   │   ├── config.py                    # Pydantic settings (reads .env)
-│   │   ├── models/domain.py             # Domain models + Pydantic schemas
-│   │   └── services/
-│   │       ├── calendar.py              # Google Calendar integration
-│   │       └── sheets.py               # Google Sheets integration
-│   ├── api/
-│   │   ├── middleware/auth.py           # JWT middleware
-│   │   └── v1/routes/
-│   │       ├── auth.py                  # /auth/token, /auth/refresh
-│   │       └── workout.py               # /workout/* endpoints
-│   ├── ai/                              # Phase 2+ (LSTM, pose, LLM)
-│   ├── data/                            # Phase 2+ (repositories)
-│   └── utils/logging.py
-├── scripts/
-│   └── init.sql                         # Postgres schema
-├── credentials/                         # Google credentials (gitignored)
-├── docker-compose.yml
-├── Dockerfile
-├── requirements.txt
-└── .env.example
-```
+Use Python 3.12 and the existing project environment on Windows:
 
----
-
-## Quickstart (Local Dev)
-
-### 1. Clone and set up environment
-
-```bash
-python -m venv venv
-source venv/bin/activate           # Windows: venv\Scripts\activate
+```powershell
+.myenv312\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp .env.example .env
+Copy-Item .env.example .env
 ```
 
-### 2. Set up Google credentials
+Configure `.env` with:
 
-**Option A — Service Account (recommended for production)**
+- `SUPABASE_URL`: project URL.
+- `SUPABASE_ANON_KEY`: Supabase public/anon key used to validate access tokens.
+- `DATABASE_URL`: Supabase PostgreSQL connection string using `postgresql+asyncpg`. For Supabase's transaction pooler, use SSL and disable the asyncpg statement cache as shown in `.env.example`.
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com) → IAM & Admin → Service Accounts
-2. Create a service account, download the JSON key
-3. Save as `credentials/service_account.json`
-4. Enable **Google Calendar API** and **Google Sheets API** in your project
-5. Share your Google Sheet with the service account email (Editor role)
-6. In `.env`: set `GOOGLE_SERVICE_ACCOUNT_FILE=credentials/service_account.json`
+Before starting the API, run [`scripts/migrate_supabase_workouts.sql`](scripts/migrate_supabase_workouts.sql) once in the Supabase SQL Editor. It preserves existing workout/history tables under `legacy_*` names, creates normalized session/log/set tables, and removes direct anonymous/authenticated table access. It does not delete Supabase Auth users. Review and back up the legacy tables before later dropping them.
 
-**Option B — OAuth 2.0 (easiest for personal use)**
+Then run [`scripts/migrate_supabase_calendar.sql`](scripts/migrate_supabase_calendar.sql) once. It preserves unowned legacy calendar rows in a locked-down `legacy_calendar_events` table, creates the UUID-owned calendar and connection tables, and installs owner-scoped RLS. Existing legacy events are intentionally not assigned to a user because their ownership cannot be established reliably.
 
-1. Go to Google Cloud Console → APIs & Services → Credentials
-2. Create OAuth 2.0 Client ID → Desktop Application
-3. Download the JSON, save as `credentials/google_oauth.json`
-4. Enable **Google Calendar API** and **Google Sheets API**
-5. First run will open a browser window for user consent; token is cached to `credentials/token.json`
+Phase 2 server configuration may include `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` (if required by the OAuth client), `GOOGLE_CALENDAR_ID` (defaults to `primary`), `GEMINI_API_KEY`, and `GEMINI_MODEL` (defaults to `gemini-2.5-flash`). Never put these values in Flutter. To enable form analysis now, create a Gemini API key in [Google AI Studio](https://aistudio.google.com/apikey), enable the Gemini API for the associated Google project, set `GEMINI_API_KEY` in the backend `.env`, and restart FastAPI. Check the selected model is available to that key/project if Google returns a model-not-found or permission error. Calendar sync requires Google Calendar read access; form analysis returns `503` until the Gemini key is configured.
 
-### 3. Create your Google Sheet
+The app checks database connectivity at startup. It does not create or migrate production tables automatically.
 
-1. Create a new Google Sheet at [sheets.google.com](https://sheets.google.com)
-2. Copy the spreadsheet key from the URL:
-   `https://docs.google.com/spreadsheets/d/`**`THIS_IS_YOUR_KEY`**`/edit`
-3. Set `GOOGLE_SPREADSHEET_KEY=your-key` in `.env`
-
-The service will auto-create the `WorkoutLog` worksheet with correct headers on first write.
-
-### 4. Run the server
-
-```bash
-uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+```powershell
+.myenv312\Scripts\python.exe -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Visit:
-- **Swagger UI**: http://localhost:8000/docs
-- **Health check**: http://localhost:8000/health
+Swagger UI is available at `http://localhost:8000/docs` in development; health is at `http://localhost:8000/health`.
 
----
+## Docker
 
-## Docker (Full Stack)
+Set the same Supabase values in `.env`, then run:
 
-```bash
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your credentials and keys
-
-# Start Postgres + Redis + Backend
-docker-compose up --build -d
-
-# With ML worker (Phase 2+)
-docker-compose --profile ml up -d
-
-# Check logs
-docker-compose logs -f backend
+```powershell
+docker compose up --build -d
 ```
 
----
+Compose no longer starts a second PostgreSQL database. Redis is retained for the deferred worker phase.
 
-## API Reference & Test Commands
+## Public MVP Deployment (Render)
 
-### Get an auth token
+The repository includes [`render.yaml`](render.yaml), which configures a native Python web service with `/health` checks and a lean dependency list in [`requirements-render.txt`](requirements-render.txt). Connect the GitHub repository to Render, select **New → Blueprint**, and create the service from the `main` branch. Set the required secrets in the Render service environment before the first successful deploy:
 
-```bash
-curl -s -X POST http://localhost:8000/api/v1/auth/token \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "alice", "secret": "dev"}' | python3 -m json.tool
+- `DATABASE_URL`: the Supabase PostgreSQL connection string (use the pooler URL and `ssl=require` as appropriate).
+- `SUPABASE_URL` and `SUPABASE_ANON_KEY`: used to validate mobile Supabase access tokens.
+- `GEMINI_API_KEY`: optional for MVP workout logging; required for form video analysis.
+
+Run the workout and calendar SQL migrations in the Supabase SQL Editor before expecting database-backed routes to work. `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` are optional unless the Google token-refresh flow needs them. Set secrets only in Render's environment settings; never commit `.env`, OAuth JSON, Supabase credentials, or Gemini keys.
+
+Render Free is for demos, not production: services spin down after 15 minutes without traffic and can take about a minute to wake; the filesystem is ephemeral; the free instance has 512 MB RAM. No uploaded workout video is retained by this API, but use short/compressed clips for free-tier reliability. Supabase remains the persistent database. A free Supabase project may also pause when inactive. Verify current provider limits and terms before distributing broadly.
+
+After deploy, test `https://<service-name>.onrender.com/health`, then configure Flutter's `API_BASE_URL` to that HTTPS origin. The first request after idle may be slow because the service is waking.
+
+## Test on a Phone Over Wi-Fi
+
+Start the local API listening on all interfaces:
+
+```powershell
+.myenv312\Scripts\python.exe -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Log a workout
+Find the development computer's IPv4 address on the same Wi-Fi network (`ipconfig` on Windows), then use `http://<computer-lan-ip>:8000` as the Flutter `API_BASE_URL` on a physical phone. Allow Python/Uvicorn through Windows Defender Firewall on the private network if prompted. Confirm the API first from the phone browser at `/health`. Android Emulator uses `http://10.0.2.2:8000`; iOS Simulator normally uses `http://127.0.0.1:8000`. Do not use a LAN address for production; installed-app testing outside your Wi-Fi should use the Render HTTPS URL.
 
-```bash
-TOKEN="your-access-token-here"
+## Authentication
 
-curl -s -X POST http://localhost:8000/api/v1/workout/log \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "alice",
-    "entries": [
-      {
-        "exercise": "Bench Press",
-        "sets": 4,
-        "reps": 8,
-        "weight_kg": 80,
-        "rpe": 7.5,
-        "exercise_type": "strength",
-        "muscle_group": "chest"
-      },
-      {
-        "exercise": "Overhead Press",
-        "sets": 3,
-        "reps": 10,
-        "weight_kg": 50,
-        "rpe": 7,
-        "muscle_group": "shoulders"
-      }
-    ],
-    "session_metadata": {
-      "mood": 8,
-      "energy": 7,
-      "sleep_quality": 8
+Sign up and sign in through the Supabase client SDK in the mobile app (email/password or Google provider). Pass the current Supabase access token on API requests:
+
+```http
+Authorization: Bearer <supabase-access-token>
+```
+
+`GET /api/v1/auth/me` validates the token with Supabase Auth and returns the authenticated profile. FastAPI does not issue or refresh authentication tokens.
+
+## Core API
+
+- `GET /api/v1/exercises?search=bench&muscle_group=chest`: authenticated exercise catalog search.
+- `GET /api/v1/exercises/{exercise_id}`: retrieve a catalog exercise.
+- `POST /api/v1/exercises`: create a private exercise visible only to its owner.
+- `DELETE /api/v1/exercises/{exercise_id}`: delete an owned custom exercise; shared master rows are immutable.
+- `POST /api/v1/workout/log`: log one exercise or an entire session in one transaction.
+- `GET /api/v1/workout/history?days=90&exercise=Bench&limit=50&offset=0`: user-scoped sessions, with per-set data nested under exercise entries for collapsible history.
+- `DELETE /api/v1/workout/sessions/{session_id}`: delete an owned session and its entries/sets.
+- `GET /api/v1/workout/progress/{exercise}?days=365`: per-set-derived weight, volume, 1RM trends, and PRs.
+- `GET /api/v1/calendar/events?days_ahead=7`: list owned events for 7, 14, or 30 days; optional `start_at` and `end_at` allow an explicit range.
+- `POST /api/v1/calendar/events`: create a manual event using `title`, `start`, `end`, optional `description`/`location`, `type`, `estimated_duration_min`, and `estimated_volume`.
+- `POST /api/v1/calendar/sync`: sync workout-related events from Google Calendar. Body: `{"access_token":"...","refresh_token":"...","days_ahead":7}`. Tokens are never persisted; a refresh token is optional.
+- `GET /api/v1/auth/connections`: return the last verified Google Calendar connection and sync state.
+- `GET /api/v1/ai/insights?exercise={exercise_id}`: derive warm-ups and conservative 1RM/next-session estimates from the caller's logged sets.
+- `POST /api/v1/ai/analyze-form`: multipart form with `exercise` and exactly one of `video` (video file, up to 100 MB) or `video_url` (public YouTube URL). Private/unlisted videos are not readable by Gemini; upload a local video exported from the phone instead. Uploaded files are deleted from Gemini after analysis and are not stored by FastAPI. Returned coaching feedback is model-generated and is not medical advice.
+- `GET /api/v1/ai/training-analysis?days=365&limit=200`: user-scoped longitudinal analysis including every logged set's reps, load, RPE, volume, and estimated 1RM, plus session summaries, exercise trends, and general progression/recovery guidance. Results are bounded to at most 500 sessions per request; `truncated=true` signals that the requested window exceeded the session limit.
+
+Example log request. Parent exercise entries store only total sets and total reps; weights exist only on individual sets:
+
+```json
+{
+  "entries": [
+    {
+      "exercise": "Bench Press",
+      "exercise_id": "ex-bench-press",
+      "exercise_type": "strength",
+      "muscle_group": "chest",
+      "rpe": 7.5,
+      "sets": [
+        { "reps": 8, "weight_kg": 60.0, "rpe": 7.0 },
+        { "reps": 6, "weight_kg": 65.5, "rpe": 8.0 }
+      ]
     }
-  }' | python3 -m json.tool
+  ],
+  "session_metadata": {
+    "mood": 8,
+    "energy": 7,
+    "sleep_quality": 8,
+    "notes": "Morning session"
+  }
+}
 ```
 
-### Sync Google Calendar
+The user ID comes from the bearer token and is intentionally absent from the request body. The database applies transactional parent/child constraints and user ownership constraints.
 
-```bash
-curl -s -X POST "http://localhost:8000/api/v1/workout/schedule/sync?days_ahead=7" \
-  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
-```
+## Verification
 
-### Get exercise progress
-
-```bash
-curl -s "http://localhost:8000/api/v1/workout/progress/Bench%20Press?days=90" \
-  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
-```
-
-### Get workout history
-
-```bash
-curl -s "http://localhost:8000/api/v1/workout/history?exercise=Bench%20Press&days=30" \
-  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
-```
-
----
-
-## Phase Roadmap
-
-| Phase | Status | What ships |
-|-------|--------|------------|
-| **1 — Scaffold + Google APIs** | ✅ Done | FastAPI, Calendar sync, Sheets logger, JWT auth |
-| **2 — LSTM Predictor** | Next | Workout prediction (weight/reps/RPE) with confidence intervals |
-| **3 — Pose Estimation** | Soon | Video upload → form analysis via MediaPipe + YOLOv8 |
-| **4 — LLM Coach** | Soon | GPT-4 powered personalized coaching and progress narrative |
-| **5 — Docker + ML Ops** | Soon | Production deploy, Celery workers, model training pipeline |
-
----
-
-## Environment Variables Reference
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `GOOGLE_SERVICE_ACCOUNT_FILE` | Path to service account JSON | Option A |
-| `GOOGLE_CREDENTIALS_FILE` | Path to OAuth client JSON | Option B |
-| `GOOGLE_SPREADSHEET_KEY` | Google Sheets spreadsheet key | ✅ |
-| `GOOGLE_CALENDAR_ID` | Calendar ID (default: `primary`) | ✅ |
-| `APP_SECRET_KEY` | JWT signing secret (use random 32-byte hex) | ✅ |
-| `DATABASE_URL` | Postgres connection string | Phase 2+ |
-| `REDIS_URL` | Redis connection string | Phase 2+ |
-| `OPENAI_API_KEY` | OpenAI key for LLM coach | Phase 4 |
-
-Generate a secure secret key:
-```bash
-python3 -c "import secrets; print(secrets.token_hex(32))"
+```powershell
+.myenv312\Scripts\python.exe -m pytest tests -q
 ```

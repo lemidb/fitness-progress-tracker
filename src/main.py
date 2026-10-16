@@ -21,6 +21,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.api.v1.routes.auth import router as auth_router
+from src.api.v1.routes.ai import router as ai_router
+from src.api.v1.routes.calendar import router as calendar_router
+from src.api.v1.routes.exercises import router as exercises_router
 from src.api.v1.routes.workout import router as workout_router
 from src.core.config import get_settings
 from src.data.database import close_db, init_db
@@ -65,9 +68,8 @@ app = FastAPI(
     title=settings.app_title,
     version=settings.app_version,
     description=(
-        "State-of-the-art AI fitness platform. "
-        "Integrates Google Calendar, Google Sheets, pose estimation, "
-        "LSTM performance prediction, and LLM coaching."
+        "Fitness tracking API using Supabase Auth for identity and PostgreSQL "
+        "for exercise catalogs, workouts, history, and progress."
     ),
     docs_url="/docs" if settings.app_debug else None,
     redoc_url="/redoc" if settings.app_debug else None,
@@ -111,6 +113,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 # ── Routers ───────────────────────────────────────────────────────────────────
 
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(calendar_router, prefix="/api/v1")
+app.include_router(ai_router, prefix="/api/v1")
+app.include_router(exercises_router, prefix="/api/v1")
 app.include_router(workout_router, prefix="/api/v1")
 
 

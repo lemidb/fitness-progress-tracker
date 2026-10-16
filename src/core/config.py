@@ -13,7 +13,6 @@ class Settings(BaseSettings):
 
     # ── App ──────────────────────────────────────────────────────────────────
     app_env: str = "development"
-    app_secret_key: str = "change-me"
     app_debug: bool = True
     app_title: str = "Fitness AI API"
     app_version: str = "1.0.0"
@@ -22,21 +21,24 @@ class Settings(BaseSettings):
     google_credentials_file: str = "credentials/google_oauth.json"
     google_token_file: str = "credentials/token.json"
     google_service_account_file: str = ""
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
     google_spreadsheet_key: str = ""
     google_worksheet_name: str = "WorkoutLog"
     google_calendar_id: str = "primary"
 
     # ── Database ─────────────────────────────────────────────────────────────
-    database_url: str = "postgresql+asyncpg://admin:password@localhost:5432/fitness_ai"
+    database_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
 
-    # ── JWT ──────────────────────────────────────────────────────────────────
-    jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 60
-    jwt_refresh_token_expire_days: int = 30
+    # ── Supabase ─────────────────────────────────────────────────────────────
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
 
     # ── AI ───────────────────────────────────────────────────────────────────
     openai_api_key: str = ""
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
     model_path: str = "models/"
 
     @property
